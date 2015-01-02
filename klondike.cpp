@@ -1,5 +1,8 @@
 #include <iostream>
 #include <sstream>
+#include <random>
+#include <chrono>
+#include <algorithm>
 
 namespace std {
     template <typename T>
@@ -61,6 +64,81 @@ public:
 
 Card Card::UNKNOWN;
 Card Card::EMPTY(CardValue::EMPTY, Suit::SPADES);
+
+std::ostream& operator<<(std::ostream& stream, const Card& card) {
+    switch(card.getValue()) {
+    case CardValue::ACE:
+        stream << "A";
+        break;
+    case CardValue::KING:
+        stream << "K";
+        break;
+    case CardValue::QUEEN:
+        stream << "Q";
+        break;
+    case CardValue::JACK:
+        stream << "J";
+        break;
+    case CardValue::TEN:
+        stream << "T";
+        break;
+    case CardValue::UNKNOWN:
+        stream << "[]";
+        break;
+    case CardValue::EMPTY:
+        stream << "--";
+        break;
+    default:
+        stream << static_cast<unsigned>(std::enum_value(card.getValue()));
+    }
+    if(card.isKnown()) {
+        switch(card.getSuit()) {
+        case Suit::SPADES:
+            stream << "S";//"\u2664";
+            break;
+        case Suit::HEARTS:
+            stream << "H";//"\u2661";
+            break;
+        case Suit::DIAMONDS:
+            stream << "D";//"\u2662";
+            break;
+        case Suit::CLUBS:
+            stream << "C";//"\u2667";
+            break;
+        }
+    }
+    return stream;
+}
+
+class Deck {
+private:
+    std::vector<Card> cards;
+    unsigned seed;
+public:
+    Deck(unsigned seed) : seed(seed) {
+        auto rand = std::default_random_engine(seed);
+        for(Suit suit : { Suit::SPADES, Suit::HEARTS, Suit::DIAMONDS, Suit::CLUBS }) {
+            for(CardValue value : { CardValue::ACE, CardValue::TWO, CardValue::THREE, CardValue::FOUR, CardValue::FIVE, CardValue::SIX, CardValue::SEVEN, CardValue::EIGHT, CardValue::NINE, CardValue::TEN, CardValue::JACK, CardValue::QUEEN, CardValue::KING }) {
+                cards.emplace_back(value, suit);
+            }
+        }
+        std::shuffle(cards.begin(), cards.end(), rand);
+    }
+    Deck() : Deck(std::chrono::system_clock::now().time_since_epoch().count()) {}
+    inline const Card& operator[](size_t index) const {
+        return cards[index];
+    }
+    typedef std::vector<Card>::const_iterator const_iterator;
+    inline const_iterator begin() const {
+        return cards.begin();
+    }
+    inline const_iterator end() const {
+        return cards.end();
+    }
+    inline unsigned getSeed() const {
+        return seed;
+    }
+};
 
 class CardPile {
 private:
@@ -153,12 +231,17 @@ private:
     CardPile tableaus[7];
     CardPile foundations[4];
 public:
-    GameState() : stockPile(23, 23), waste(1, 0) {
+    GameState(const Deck& deck) : stockPile(23, 23), waste(1, 0) {
+        size_t deckOffset = 0;
         for(size_t i=0; i<7; ++i) {
             tableaus[i] = CardPile(i + 1, i);
             for(size_t j=0; j<=i; ++j) {
-                tableaus[i][j] = Card(CardValue::ACE, Suit::SPADES);
+                tableaus[i][j] = deck[deckOffset++];
             }
+        }
+        waste[0] = deck[deckOffset++];
+        for(size_t i=0; i<stockPile.size(); ++i) {
+            stockPile[i] = deck[deckOffset++];
         }
     }
     const CardPile& getStockPile() const { return stockPile; }
@@ -166,48 +249,6 @@ public:
     const CardPile& getTableau(uint_fast8_t index) const { return tableaus[index]; }
     const CardPile& getFoundation(uint_fast8_t index) const { return foundations[index]; }
 };
-
-std::ostream& operator<<(std::ostream& stream, const Card& card) {
-    switch(card.getValue()) {
-    case CardValue::ACE:
-        stream << "A";
-        break;
-    case CardValue::KING:
-        stream << "K";
-        break;
-    case CardValue::QUEEN:
-        stream << "Q";
-        break;
-    case CardValue::JACK:
-        stream << "J";
-        break;
-    case CardValue::UNKNOWN:
-        stream << "[]";
-        break;
-    case CardValue::EMPTY:
-        stream << "--";
-        break;
-    default:
-        stream << std::enum_value(card.getValue());
-    }
-    if(card.isKnown()) {
-        switch(card.getSuit()) {
-        case Suit::SPADES:
-            stream << "S";//"\u2664";
-            break;
-        case Suit::HEARTS:
-            stream << "H";//"\u2661";
-            break;
-        case Suit::DIAMONDS:
-            stream << "D";//"\u2662";
-            break;
-        case Suit::CLUBS:
-            stream << "C";//"\u2667";
-            break;
-        }
-    }
-    return stream;
-}
 
 std::ostream& operator<<(std::ostream& stream, const GameState& state) {
     stream << (state.getStockPile().empty() ? "--" : "[]") << " " << state.getWaste().top() << "   ";
@@ -240,6 +281,8 @@ std::ostream& operator<<(std::ostream& stream, const GameState& state) {
 }
 
 int main(int, char**) {
-    GameState game;
+    Deck deck;
+    GameState game(deck);
+    std::cout << "Game #" << deck.getSeed() << std::endl << std::endl;
     std::cout << game;
 }
