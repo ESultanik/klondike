@@ -227,9 +227,31 @@ public:
         ret.pile[internalSize] = newCard;
         return ret;
     }
-    CardPile removeTop() const {
-        CardPile ret(internalSize - 1, numHidden);
-        memcpy(ret.pile, pile, sizeof(Card) * (internalSize - 1));
+    CardPile addTop(const CardPile& copyFrom, signed numCards = -1) const {
+        if(numCards < 0 || (size_t)numCards > copyFrom.size()) {
+            numCards = copyFrom.size();
+        }
+#ifndef NDEBUG
+        for(signed i=1; i<=numCards; ++i) {
+            assert(copyFrom[copyFrom.size()-i].isKnown());
+        }
+#endif
+        CardPile ret(internalSize + numCards, numHidden);
+        memcpy(ret.pile, pile, sizeof(Card) * internalSize);
+        if(numCards > 0) {
+            memcpy(&ret.pile[internalSize], &copyFrom.pile[copyFrom.size() - numCards], sizeof(Card) * numCards);
+        }
+        return ret;
+    }
+    CardPile removeTop(size_t numToRemove = 1) const {
+        if(numToRemove > size()) {
+            numToRemove = size();
+        }
+        CardPile ret(internalSize - numToRemove, numHidden);
+        memcpy(ret.pile, pile, sizeof(Card) * (internalSize - numToRemove));
+        if(ret.numHidden > ret.size()) {
+            ret.numHidden = ret.size();
+        }
         return ret;
     }
     CardPile flip() const {
@@ -308,6 +330,19 @@ public:
     TableauToFoundation(uint_fast8_t tableau) : tableau(tableau) {}
     virtual ~TableauToFoundation() {}
     inline operator size_t() const { return tableau; }
+};
+
+class TableauToTableau : public AbstractMove {
+private:
+    uint8_t source;
+    uint8_t numCards;
+    uint8_t destination;
+public:
+    TableauToTableau(uint_fast8_t source, uint_fast8_t numCards, uint_fast8_t destination) : source(source), numCards(numCards), destination(destination) {}
+    virtual ~TableauToTableau() {}
+    inline uint_fast8_t getSource() const { return source; }
+    inline uint_fast8_t getNumCards() const { return numCards; }
+    inline uint_fast8_t getDestination() const { return destination; }
 };
 
 class Move {
@@ -420,6 +455,24 @@ public:
             }
         }
     }
+    GameState(const GameState& copy, const TableauToTableau& move) : stockPile(copy.getStockPile()), waste(copy.getWaste()) {
+        assert(copy.tableaus[move.getSource()].size() >= move.getNumCards());
+        assert(move.getSource() != move.getDestination());
+        for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
+            if(i == move.getSource()) {
+                tableaus[i] = copy.tableaus[i].removeTop(move.getNumCards());
+            } else if(i == move.getDestination()) {
+                tableaus[i] = copy.tableaus[i].addTop(copy.tableaus[move.getSource()], move.getNumCards());
+            } else {
+                tableaus[i] = copy.tableaus[i];
+            }
+        }        
+        /* flip the next card, if there is one: */
+        tableaus[move.getSource()].revealTop();
+        for(size_t i=0; i<std::extent<decltype(foundations)>::value; ++i) {
+            foundations[i] = copy.foundations[i];
+        }        
+    }
     /* TODO: Implement this move constructor when/if needed.
     GameState(GameState&& move) : stockPile(std::move(move.stockPile)), waste(std::move(move.waste)) {
     }
@@ -455,8 +508,24 @@ public:
             if(!tableaus[tableau].empty()) {
                 Card cardToMove = tableaus[tableau].top();
                 size_t foundationId = std::enum_value(cardToMove.getSuit());
+                /* first, see if we can move the top card of this tableau to the top of a foundation: */
                 if((foundations[foundationId].empty() && cardToMove.getValue() == CardValue::ACE) || (!foundations[foundationId].empty() && cardToMove == (foundations[foundationId].top() + 1))) {
                     succ.emplace_back(*this, TableauToFoundation(tableau));
+                }
+                /* next, see if we can move any subset of the cards in this tableau to another tableau: */
+                for(size_t numCards = 1; numCards <= tableaus[tableau].size(); ++numCards) {
+                    Card topCard = tableaus[tableau][tableaus[tableau].size() - numCards];
+                    if(!topCard.isKnown()) {
+                        break; /* we've reached the first unknown (face-down) card */
+                    }
+                    for(size_t destinationTableau = 0; destinationTableau < std::extent<decltype(tableaus)>::value; ++destinationTableau) {
+                        if(destinationTableau == tableau) {
+                            continue; /* we can't move cards to the same tableau! */
+                        }
+                        if((tableaus[destinationTableau].empty() && topCard.getValue() == CardValue::KING) || (!tableaus[destinationTableau].empty() && (topCard + 1).getValue() == tableaus[destinationTableau].top().getValue() && topCard.getColor() != tableaus[destinationTableau].top().getColor())) {
+                            succ.emplace_back(*this, TableauToTableau(tableau, numCards, destinationTableau));
+                        }
+                    }
                 }
             }
         }
