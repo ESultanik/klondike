@@ -1,9 +1,9 @@
+#include <cassert>
 #include <iostream>
 #include <sstream>
 #include <random>
 #include <chrono>
 #include <algorithm>
-#include <cassert>
 
 namespace std {
     template <typename T>
@@ -21,11 +21,16 @@ namespace std {
     }
 }
 
+enum class Color : bool {
+    BLACK = 1,
+    RED   = 0
+};
+
 enum class Suit : uint8_t {
-    SPADES = 0,
-    HEARTS = 1,
+    HEARTS   = 0,
+    SPADES   = 1,
     DIAMONDS = 2,
-    CLUBS = 3
+    CLUBS    = 3
 };
 
 enum class CardValue : uint8_t {
@@ -59,6 +64,9 @@ public:
     }
     inline CardValue getValue() const {
         return static_cast<CardValue>(rawCard >> 2);
+    }
+    inline Color getColor() const {
+        return static_cast<Color>((std::enum_value(getSuit()) % 2) == 0);
     }
     Card& operator=(const Card& copy) {
         rawCard = copy.rawCard;
@@ -345,7 +353,8 @@ public:
         }
     }
     GameState(const GameState& copy, const WasteToFoundation& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()) {
-        assert((copy.foundations[move].empty() && copy.waste.top().getValue() == CardValue::ACE) || (copy.waste.top() == copy.foundations[move].top() + 1));
+        assert(!copy.waste.empty());
+        assert((copy.foundations[move].empty() && copy.waste.top().getValue() == CardValue::ACE) || (!copy.foundations[move].empty() && copy.waste.top() == copy.foundations[move].top() + 1));
         assert(std::enum_value(copy.waste.top().getSuit()) == move);
         for(size_t i=0; i<7; ++i) {
             tableaus[i] = copy.tableaus[i];
@@ -357,6 +366,20 @@ public:
                 foundations[i] = copy.foundations[i];
             }
         }
+    }
+    GameState(const GameState& copy, const WasteToTableau& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()) {
+        assert(!copy.waste.empty());
+        assert((copy.tableaus[move].empty() && copy.waste.top().getValue() == CardValue::KING) || (!copy.tableaus[move].empty() && (copy.waste.top() + 1).getValue() == copy.tableaus[move].top().getValue() && copy.waste.top().getColor() != copy.tableaus[move].top().getColor()));
+        for(size_t i=0; i<7; ++i) {
+            if(i == move) {
+                tableaus[i] = copy.tableaus[i].addTop(copy.waste.top());
+            } else {
+                tableaus[i] = copy.tableaus[i];
+            }
+        }
+        for(size_t i=0; i<4; ++i) {
+            foundations[i] = copy.foundations[i];
+        }        
     }
     /* TODO: Implement this move constructor when/if needed.
     GameState(GameState&& move) : stockPile(std::move(move.stockPile)), waste(std::move(move.waste)) {
@@ -378,9 +401,14 @@ public:
         if(!waste.empty()) {
             Card wasteTop = waste.top();
             size_t foundationId = std::enum_value(wasteTop.getSuit());
-            if((foundations[foundationId].empty() && wasteTop.getValue() == CardValue::ACE) || wasteTop == foundations[foundationId].top() + 1) {
+            if((foundations[foundationId].empty() && wasteTop.getValue() == CardValue::ACE) || (!foundations[foundationId].empty() && wasteTop == foundations[foundationId].top() + 1)) {
                 /* we can move the top of the waste directly to a foundation */
                 succ.emplace_back(*this, WasteToFoundation(foundationId));
+            }
+            for(size_t tableau=0; tableau < std::extent<decltype(tableaus)>::value; ++tableau) {
+                if((tableaus[tableau].empty() && wasteTop.getValue() == CardValue::KING) || (!tableaus[tableau].empty() && (wasteTop + 1).getValue() == tableaus[tableau].top().getValue() && wasteTop.getColor() != tableaus[tableau].top().getColor())) {
+                    succ.emplace_back(*this, WasteToTableau(tableau));
+                }
             }
         }
         return succ;
