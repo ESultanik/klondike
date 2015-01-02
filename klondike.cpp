@@ -3,11 +3,21 @@
 #include <random>
 #include <chrono>
 #include <algorithm>
+#include <cassert>
 
 namespace std {
     template <typename T>
     constexpr typename std::underlying_type<T>::type enum_value(T val) {
         return static_cast<typename std::underlying_type<T>::type>(val);
+    }
+
+    template <class T>
+    void reverse(T* cArray, size_t n) {
+        T* last = cArray + sizeof(T) * n;
+        while((cArray != last) && (cArray != --last)) {
+            std::swap(*cArray, *last);
+            ++cArray;
+        }
     }
 }
 
@@ -39,6 +49,7 @@ enum class CardValue : uint8_t {
 class Card {
 private:
     uint8_t rawCard;
+    Card(uint8_t raw) : rawCard(raw) {}
 public:
     Card() : rawCard(0) {}
     Card(CardValue value, Suit suit) : rawCard((std::enum_value(value) << 2) | std::enum_value(suit)) {}
@@ -52,6 +63,9 @@ public:
     Card& operator=(const Card& copy) {
         rawCard = copy.rawCard;
         return *this;
+    }
+    inline Card operator+(size_t offset) const {
+        return Card(rawCard + (offset << 2));
     }
     inline bool isKnown() const { return getValue() != CardValue::UNKNOWN && getValue() != CardValue::EMPTY; }
     static Card UNKNOWN;
@@ -195,16 +209,11 @@ public:
             return pile[index];
         }
     }
-    inline Card& operator[](size_t index) {
-        if(index < numHidden) {
-            return Card::UNKNOWN;
-        } else if(index >= internalSize) {
-            return Card::EMPTY;
-        } else {
-            return pile[index];
-        }
+    void set(size_t index, const Card& card) {
+        pile[index] = card;
     }
     CardPile addTop(Card newCard) const {
+        assert(newCard.isKnown());
         CardPile ret(internalSize + 1, numHidden);
         memcpy(ret.pile, pile, sizeof(Card) * internalSize);
         ret.pile[internalSize] = newCard;
@@ -215,6 +224,12 @@ public:
         memcpy(ret.pile, pile, sizeof(Card) * (internalSize - 1));
         return ret;
     }
+    CardPile flip() const {
+        CardPile ret(internalSize, 0);
+        memcpy(ret.pile, pile, sizeof(Card) * internalSize);
+        std::reverse(ret.pile, internalSize);
+        return ret;
+    }
     inline Card top() const {
         if(empty()) {
             return Card::EMPTY;
@@ -222,7 +237,62 @@ public:
             return (*this)[internalSize - 1];
         }
     }
+    inline Card revealTop() const {
+        return pile[internalSize - 1];
+    }
+    inline Card bottom() const {
+        if(empty()) {
+            return Card::EMPTY;
+        } else {
+            return (*this)[0];
+        }
+    }
 };
+
+class AbstractMove {
+public:
+    AbstractMove() {}
+    virtual ~AbstractMove() {}
+};
+
+class MoveToWaste : public AbstractMove {
+public:
+    MoveToWaste() {}
+    virtual ~MoveToWaste() {}
+};
+
+class MakeNewStock : public AbstractMove {
+public:
+    MakeNewStock() {}
+    virtual ~MakeNewStock() {}
+};
+
+class WasteToFoundation : public AbstractMove {
+private:
+    uint8_t foundation;
+public:
+    WasteToFoundation(uint_fast8_t foundation) : foundation(foundation) {}
+    virtual ~WasteToFoundation() {}
+    inline operator size_t() const { return foundation; }
+};
+
+class WasteToTableau : public AbstractMove {
+private:
+    uint8_t tableau;
+public:
+    WasteToTableau(uint_fast8_t tableau) : tableau(tableau) {}
+    virtual ~WasteToTableau() {}
+    inline operator size_t() const { return tableau; }
+};
+
+class Move {
+public:
+    static MoveToWaste    MOVE_TO_WASTE;
+    static MakeNewStock   MAKE_NEW_STOCK;
+};
+
+MoveToWaste  Move::MOVE_TO_WASTE;
+MakeNewStock Move::MAKE_NEW_STOCK;
 
 class GameState {
 private:
@@ -236,18 +306,85 @@ public:
         for(size_t i=0; i<7; ++i) {
             tableaus[i] = CardPile(i + 1, i);
             for(size_t j=0; j<=i; ++j) {
-                tableaus[i][j] = deck[deckOffset++];
+                tableaus[i].set(j, deck[deckOffset++]);
             }
         }
-        waste[0] = deck[deckOffset++];
+        waste.set(0, deck[deckOffset++]);
         for(size_t i=0; i<stockPile.size(); ++i) {
-            stockPile[i] = deck[deckOffset++];
+            stockPile.set(i, deck[deckOffset++]);
         }
     }
+    GameState(const GameState& copy) : stockPile(copy.stockPile), waste(copy.waste) {
+        for(size_t i=0; i<7; ++i) {
+            tableaus[i] = copy.tableaus[i];
+        }
+        for(size_t i=0; i<4; ++i) {
+            foundations[i] = copy.foundations[i];
+        }
+    }
+    GameState(const GameState& copy, const MoveToWaste&) : stockPile(std::move(copy.stockPile.removeTop())), waste(std::move(copy.waste.addTop(copy.stockPile.revealTop()))) {
+        assert(!copy.stockPile.empty());
+        assert(stockPile.size() == copy.stockPile.size() - 1);
+        assert(waste.size() == copy.waste.size() + 1);
+        assert(waste.top() == copy.stockPile.revealTop());
+        for(size_t i=0; i<7; ++i) {
+            tableaus[i] = copy.tableaus[i];
+        }
+        for(size_t i=0; i<4; ++i) {
+            foundations[i] = copy.foundations[i];
+        }
+    }
+    GameState(const GameState& copy, const MakeNewStock&) : stockPile(copy.getWaste().flip().removeTop()), waste(1, 0) {
+        assert(copy.stockPile.empty() && copy.waste.size() > 1);
+        waste.set(0, copy.getWaste().bottom());
+        for(size_t i=0; i<7; ++i) {
+            tableaus[i] = copy.tableaus[i];
+        }
+        for(size_t i=0; i<4; ++i) {
+            foundations[i] = copy.foundations[i];
+        }
+    }
+    GameState(const GameState& copy, const WasteToFoundation& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()) {
+        assert((copy.foundations[move].empty() && copy.waste.top().getValue() == CardValue::ACE) || (copy.waste.top() == copy.foundations[move].top() + 1));
+        assert(std::enum_value(copy.waste.top().getSuit()) == move);
+        for(size_t i=0; i<7; ++i) {
+            tableaus[i] = copy.tableaus[i];
+        }
+        for(size_t i=0; i<4; ++i) {
+            if(i == move) {
+                foundations[i] = copy.foundations[i].addTop(copy.waste.top());
+            } else {
+                foundations[i] = copy.foundations[i];
+            }
+        }
+    }
+    /* TODO: Implement this move constructor when/if needed.
+    GameState(GameState&& move) : stockPile(std::move(move.stockPile)), waste(std::move(move.waste)) {
+    }
+    */
     const CardPile& getStockPile() const { return stockPile; }
     const CardPile& getWaste() const { return waste; }
     const CardPile& getTableau(uint_fast8_t index) const { return tableaus[index]; }
     const CardPile& getFoundation(uint_fast8_t index) const { return foundations[index]; }
+    std::vector<GameState> successors() const {
+        std::vector<GameState> succ;
+        if(!stockPile.empty()) {
+            /* move one card from the stock pile into the waste */
+            succ.emplace_back(*this, Move::MOVE_TO_WASTE);
+        } else if(waste.size() > 1) {
+            /* flip the waste back over to the empty stock pile, removing the top card back to the waste */
+            succ.emplace_back(*this, Move::MAKE_NEW_STOCK);
+        }
+        if(!waste.empty()) {
+            Card wasteTop = waste.top();
+            size_t foundationId = std::enum_value(wasteTop.getSuit());
+            if((foundations[foundationId].empty() && wasteTop.getValue() == CardValue::ACE) || wasteTop == foundations[foundationId].top() + 1) {
+                /* we can move the top of the waste directly to a foundation */
+                succ.emplace_back(*this, WasteToFoundation(foundationId));
+            }
+        }
+        return succ;
+    }
 };
 
 std::ostream& operator<<(std::ostream& stream, const GameState& state) {
@@ -285,4 +422,16 @@ int main(int, char**) {
     GameState game(deck);
     std::cout << "Game #" << deck.getSeed() << std::endl << std::endl;
     std::cout << game;
+    for(auto succ : game.successors()) {
+        std::cout << succ << std::endl;
+    }
 }
+
+
+
+
+
+
+
+
+
