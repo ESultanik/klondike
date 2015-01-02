@@ -5,7 +5,7 @@ klondike.dbg : klondike.cpp
 	g++ --std=c++11 -Wall -Wextra -g $< -o $@
 
 klondike : klondike.cpp
-	g++ --std=c++11 -Wall -Wextra -O3 $< -o $@
+	g++ --std=c++11 -Wall -Wextra -DNDEBUG -O3 $< -o $@
 
 .PHONY : clean
 clean :
