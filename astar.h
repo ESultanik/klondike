@@ -53,7 +53,7 @@ public:
 
 template <class T>
 inline bool nodeComparator(const SearchNode<T>& lhs, const SearchNode<T>& rhs) {
-    return lhs.getFCost() < rhs.getFCost();
+    return lhs.getFCost() > rhs.getFCost();
 }
 
 template <class T, class H>
@@ -78,7 +78,7 @@ public:
             throw std::runtime_error("There are no more states to search!");
         }
         SearchNode<T> next = queue.top();
-        std::cout << "Searching: " << std::endl << next.getState() << std::endl;
+        std::cout << "Searching: " << next.getFCost() << "\t" << queue.size() << std::endl;// << next.getState() << std::endl;
         queue.pop();
         for(const T& successor : next.getSuccessors()) {
             if(history.find(successor) == history.end()) {
