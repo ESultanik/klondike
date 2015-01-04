@@ -56,7 +56,7 @@ public:
         }
         SearchNode<T> next = queue.top();
         queue.pop();
-        for(T successor : next.getSuccessors()) {
+        for(T& successor : next.getSuccessors()) {
             queue.emplace(successor, next.getPathCost() + 1, heuristic(successor));
         }
         return next;
@@ -64,10 +64,44 @@ public:
     SearchNode<T> solve() {
         for(;;) {
             SearchNode<T> best = step();
-            if(!best || best.getSuccessors().empty() || queue.empty()) {
+            if(best.getSuccessors().empty() || queue.empty()) {
                 return best;
             }
         }
+    }
+    std::pair<decltype(T::getLastMove()),SearchNode<T>> getBestMove() {
+        if(queue.empty()) {
+            throw std::runtime_error("There are no more states to search!");
+        } else if(queue.size() != 1) {
+            throw std::runtime_error("Error: getBestMove() is only expected to be called when there is exactly one search node in the queue!");
+        }
+        SearchNode<T> currentState = queue.top();
+        queue.pop();
+        if(queue.empty()) {
+            throw std::runtime_error("The current state has no legal moves!");
+        }
+        SearchNode<T>* best = nullptr;
+        SearchNode<T>* bestResult = nullptr;
+        for(T& successor : currentState.getSuccessors()) {
+            queue.emplace(successor, currentState.getPathCost() + 1, heuristic(successor));
+            for(;;) {
+                SearchNode<T> result = step();
+                if(result.getSuccessors().empty() || queue.empty()) {
+                    if(best == nullptr || bestResult->getFCost() > result.getFCost()) {
+                        delete best;
+                        delete bestResult;
+                        best = new SearchNode<T>(successor);
+                        bestResult = new SearchNode<T>(std::move(result));
+                    }
+                    break;
+                }
+            }
+            queue.clear();
+        }
+        auto ret = std::make_pair(best->getState().getLastMove(), std::move(*bestResult));
+        delete best;
+        delete bestResult;
+        return ret;
     }
 };
 
