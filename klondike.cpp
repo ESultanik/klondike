@@ -207,6 +207,18 @@ public:
         move.numHidden = 0;
         return *this;
     }
+    bool operator==(const CardPile& other) const {
+        if(size() != other.size() || getNumHidden() != other.getNumHidden()) {
+            return false;
+        }
+        for(size_t i=0; i<internalSize; ++i) {
+            if(pile[i] != other.pile[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+    bool operator!=(const CardPile& other) const { return !(*this == other); }
     inline size_t size() const { return internalSize; }
     inline bool empty() const { return size() == 0; }
     inline size_t getNumHidden() const { return numHidden; }
@@ -286,6 +298,14 @@ public:
         } else {
             return (*this)[0];
         }
+    }
+    inline size_t hash() const {
+        size_t h = 0;
+        for(size_t i=0; i<internalSize; ++i) {
+            /* shift left six bits (with looparound) and XOR with the next card: */
+            h = ((h >> 6) | (h << (CHAR_BIT * sizeof(h) - 6))) ^ ((std::enum_value(pile[i].getValue()) << 4) | std::enum_value(pile[i].getSuit()));
+        }
+        return h;
     }
 };
 
@@ -532,7 +552,37 @@ public:
         }
         return succ;
     }
+    bool operator==(const GameState& other) const {
+        for(size_t i=0; i<std::extent<decltype(foundations)>::value; ++i) {
+            if(foundations[i] != other.foundations[i]) {
+                return false;
+            }
+        }
+        for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
+            if(tableaus[i] != other.tableaus[i]) {
+                return false;
+            }
+        }
+        return stockPile == other.stockPile && waste == other.waste;
+    }
 };
+
+namespace std {
+    template <> struct hash<GameState> {
+        size_t operator()(const GameState& state) const {
+            size_t h = 0;
+            h ^= state.getStockPile().hash();
+            h ^= state.getWaste().hash();
+            for(size_t i=0; i<4; ++i) {
+                h ^= state.getFoundation(i).hash();
+            }
+            for(size_t i=0; i<7; ++i) {
+                h ^= state.getTableau(i).hash();
+            }
+            return h;
+        }
+    };
+}
 
 std::ostream& operator<<(std::ostream& stream, const GameState& state) {
     stream << (state.getStockPile().empty() ? "--" : "[]") << " " << state.getWaste().top() << "   ";
