@@ -21,6 +21,21 @@ public:
     SearchNode(SearchNode<T>&& move) : state(std::move(move.state)), pathCost(move.pathCost), heuristic(move.heuristic), cachedSuccessors(std::move(move.cachedSuccessors)) {}
     ~SearchNode() {}
 
+    SearchNode& operator=(const SearchNode<T>& copy) {
+        state = copy.state;
+        pathCost = copy.pathCost;
+        heuristic = copy.heuristic;
+        cachedSuccessors = copy.cachedSuccessors;
+        return *this;
+    }
+    SearchNode& operator=(SearchNode<T>&& move) {
+        state = std::move(move.state);
+        pathCost = move.pathCost;
+        heuristic = move.heuristic;
+        cachedSuccessors = std::move(move.cachedSuccessors);
+        return *this;
+    }
+
     inline const T& getState() const { return state; }
     inline unsigned getPathCost() const { return pathCost; }
     inline unsigned getHeuristic() const { return heuristic; }
@@ -41,9 +56,11 @@ inline bool nodeComparator(const SearchNode<T>& lhs, const SearchNode<T>& rhs) {
 template <class T, class H>
 class AStar {
 private:
-    std::priority_queue<SearchNode<T>, std::vector<SearchNode<T>>, std::function<bool(const SearchNode<T>&,const SearchNode<T>&)>> queue;
+    typedef std::priority_queue<SearchNode<T>, std::vector<SearchNode<T>>, std::function<bool(const SearchNode<T>&,const SearchNode<T>&)>> QueueType;
+    QueueType queue;
     H heuristic;
 public:
+    typedef decltype(((T*)nullptr)->getLastMove()) MoveType;
     AStar(const T& initialState, const H& heuristic) : queue(&nodeComparator<T>), heuristic(heuristic) {
         queue.emplace(initialState, 0, heuristic(initialState));
     }
@@ -55,8 +72,9 @@ public:
             throw std::runtime_error("There are no more states to search!");
         }
         SearchNode<T> next = queue.top();
+        std::cout << "Searching: " << std::endl << next.getState() << std::endl;
         queue.pop();
-        for(T& successor : next.getSuccessors()) {
+        for(const T& successor : next.getSuccessors()) {
             queue.emplace(successor, next.getPathCost() + 1, heuristic(successor));
         }
         return next;
@@ -69,7 +87,7 @@ public:
             }
         }
     }
-    std::pair<decltype(T::getLastMove()),SearchNode<T>> getBestMove() {
+    std::pair<MoveType,SearchNode<T>> getBestMove() {
         if(queue.empty()) {
             throw std::runtime_error("There are no more states to search!");
         } else if(queue.size() != 1) {
@@ -77,28 +95,28 @@ public:
         }
         SearchNode<T> currentState = queue.top();
         queue.pop();
-        if(queue.empty()) {
+        if(currentState.getSuccessors().empty()) {
             throw std::runtime_error("The current state has no legal moves!");
         }
-        SearchNode<T>* best = nullptr;
+        MoveType* best = nullptr;
         SearchNode<T>* bestResult = nullptr;
-        for(T& successor : currentState.getSuccessors()) {
+        for(const T& successor : currentState.getSuccessors()) {
             queue.emplace(successor, currentState.getPathCost() + 1, heuristic(successor));
             for(;;) {
                 SearchNode<T> result = step();
                 if(result.getSuccessors().empty() || queue.empty()) {
-                    if(best == nullptr || bestResult->getFCost() > result.getFCost()) {
+                    if(bestResult == nullptr || bestResult->getFCost() > result.getFCost()) {
                         delete best;
                         delete bestResult;
-                        best = new SearchNode<T>(successor);
+                        best = new MoveType(successor.getLastMove());
                         bestResult = new SearchNode<T>(std::move(result));
                     }
                     break;
                 }
             }
-            queue.clear();
+            queue = QueueType(&nodeComparator<T>);
         }
-        auto ret = std::make_pair(best->getState().getLastMove(), std::move(*bestResult));
+        auto ret = std::make_pair(std::move(*best), std::move(*bestResult));
         delete best;
         delete bestResult;
         return ret;
