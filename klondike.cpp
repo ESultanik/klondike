@@ -5,6 +5,8 @@
 #include <chrono>
 #include <algorithm>
 
+#include "astar.h"
+
 namespace std {
     template <typename T>
     constexpr typename std::underlying_type<T>::type enum_value(T val) {
@@ -287,72 +289,69 @@ public:
     }
 };
 
-class AbstractMove {
-public:
-    AbstractMove() {}
-    virtual ~AbstractMove() {}
+enum class MoveType : uint8_t {
+    DEAL,
+    MOVE_TO_WASTE,
+    MAKE_NEW_STOCK,
+    WASTE_TO_FOUNDATION,
+    WASTE_TO_TABLEAU,
+    TABLEAU_TO_FOUNDATION,
+    TABLEAU_TO_TABLEAU
 };
 
-class MoveToWaste : public AbstractMove {
-public:
-    MoveToWaste() {}
-    virtual ~MoveToWaste() {}
-};
-
-class MakeNewStock : public AbstractMove {
-public:
-    MakeNewStock() {}
-    virtual ~MakeNewStock() {}
-};
-
-class WasteToFoundation : public AbstractMove {
-private:
+typedef union {
     uint8_t foundation;
-public:
-    WasteToFoundation(uint_fast8_t foundation) : foundation(foundation) {}
-    virtual ~WasteToFoundation() {}
-    inline operator size_t() const { return foundation; }
-};
-
-class WasteToTableau : public AbstractMove {
-private:
     uint8_t tableau;
-public:
-    WasteToTableau(uint_fast8_t tableau) : tableau(tableau) {}
-    virtual ~WasteToTableau() {}
-    inline operator size_t() const { return tableau; }
-};
-
-class TableauToFoundation : public AbstractMove {
-private:
-    uint8_t tableau;
-public:
-    TableauToFoundation(uint_fast8_t tableau) : tableau(tableau) {}
-    virtual ~TableauToFoundation() {}
-    inline operator size_t() const { return tableau; }
-};
-
-class TableauToTableau : public AbstractMove {
-private:
-    uint8_t source;
-    uint8_t numCards;
-    uint8_t destination;
-public:
-    TableauToTableau(uint_fast8_t source, uint_fast8_t numCards, uint_fast8_t destination) : source(source), numCards(numCards), destination(destination) {}
-    virtual ~TableauToTableau() {}
-    inline uint_fast8_t getSource() const { return source; }
-    inline uint_fast8_t getNumCards() const { return numCards; }
-    inline uint_fast8_t getDestination() const { return destination; }
-};
+    struct {
+        uint8_t source;
+        uint8_t numCards;
+        uint8_t destination;
+    } tableauMove;
+} MoveData;
 
 class Move {
 public:
-    static MoveToWaste    MOVE_TO_WASTE;
-    static MakeNewStock   MAKE_NEW_STOCK;
+    MoveType type;
+    MoveData data;
+    Move(MoveType type, MoveData data) : type(type), data(data) {}
+    Move(const Move& copy) : type(copy.type), data(copy.data) {}
 };
 
-MoveToWaste  Move::MOVE_TO_WASTE;
-MakeNewStock Move::MAKE_NEW_STOCK;
+class MoveToWaste : public Move {
+public:
+    MoveToWaste() : Move(MoveType::MOVE_TO_WASTE, { 0 }) {}
+};
+
+class MakeNewStock : public Move {
+public:
+    MakeNewStock() : Move(MoveType::MAKE_NEW_STOCK, { 0 }) {}
+};
+
+class WasteToFoundation : public Move {
+public:
+    WasteToFoundation(uint_fast8_t foundation) : Move(MoveType::WASTE_TO_FOUNDATION, { .foundation = foundation }) {}
+    inline operator size_t() const { return data.foundation; }
+};
+
+class WasteToTableau : public Move {
+public:
+    WasteToTableau(uint_fast8_t tableau) : Move(MoveType::WASTE_TO_TABLEAU, { .tableau = tableau }) {}
+    inline operator size_t() const { return data.tableau; }
+};
+
+class TableauToFoundation : public Move {
+public:
+    TableauToFoundation(uint_fast8_t tableau) : Move(MoveType::TABLEAU_TO_FOUNDATION, { .tableau = tableau }) {}
+    inline operator size_t() const { return data.tableau; }
+};
+
+class TableauToTableau : public Move {
+public:
+    TableauToTableau(uint_fast8_t source, uint_fast8_t numCards, uint_fast8_t destination) : Move(MoveType::TABLEAU_TO_TABLEAU, { .tableauMove = { .source = source, .numCards = numCards, .destination = destination} }) {}
+    inline uint_fast8_t getSource() const { return data.tableauMove.source; }
+    inline uint_fast8_t getNumCards() const { return data.tableauMove.numCards; }
+    inline uint_fast8_t getDestination() const { return data.tableauMove.destination; }
+};
 
 class GameState {
 private:
@@ -360,8 +359,9 @@ private:
     CardPile waste;
     CardPile tableaus[7];
     CardPile foundations[4];
+    Move lastMove;
 public:
-    GameState(const Deck& deck) : stockPile(23, 23), waste(1, 0) {
+    GameState(const Deck& deck) : stockPile(23, 23), waste(1, 0), lastMove(MoveType::DEAL, { 0 }) {
         size_t deckOffset = 0;
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
             tableaus[i] = CardPile(i + 1, i);
@@ -374,7 +374,7 @@ public:
             stockPile.set(i, deck[deckOffset++]);
         }
     }
-    GameState(const GameState& copy) : stockPile(copy.stockPile), waste(copy.waste) {
+    GameState(const GameState& copy) : stockPile(copy.stockPile), waste(copy.waste), lastMove(copy.lastMove) {
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
             tableaus[i] = copy.tableaus[i];
         }
@@ -382,7 +382,7 @@ public:
             foundations[i] = copy.foundations[i];
         }
     }
-    GameState(const GameState& copy, const MoveToWaste&) : stockPile(std::move(copy.stockPile.removeTop())), waste(std::move(copy.waste.addTop(copy.stockPile.revealTop()))) {
+    GameState(const GameState& copy, const MoveToWaste& move) : stockPile(std::move(copy.stockPile.removeTop())), waste(std::move(copy.waste.addTop(copy.stockPile.revealTop()))), lastMove(move) {
         assert(!copy.stockPile.empty());
         assert(stockPile.size() == copy.stockPile.size() - 1);
         assert(waste.size() == copy.waste.size() + 1);
@@ -394,7 +394,7 @@ public:
             foundations[i] = copy.foundations[i];
         }
     }
-    GameState(const GameState& copy, const MakeNewStock&) : stockPile(copy.getWaste().flip().removeTop()), waste(1, 0) {
+    GameState(const GameState& copy, const MakeNewStock& move) : stockPile(copy.getWaste().flip().removeTop()), waste(1, 0), lastMove(move) {
         assert(copy.stockPile.empty() && copy.waste.size() > 1);
         waste.set(0, copy.getWaste().bottom());
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
@@ -404,7 +404,7 @@ public:
             foundations[i] = copy.foundations[i];
         }
     }
-    GameState(const GameState& copy, const WasteToFoundation& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()) {
+    GameState(const GameState& copy, const WasteToFoundation& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()), lastMove(move) {
         assert(!copy.waste.empty());
         assert((copy.foundations[move].empty() && copy.waste.top().getValue() == CardValue::ACE) || (!copy.foundations[move].empty() && copy.waste.top() == copy.foundations[move].top() + 1));
         assert(std::enum_value(copy.waste.top().getSuit()) == move);
@@ -419,7 +419,7 @@ public:
             }
         }
     }
-    GameState(const GameState& copy, const WasteToTableau& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()) {
+    GameState(const GameState& copy, const WasteToTableau& move) : stockPile(copy.getStockPile()), waste(copy.waste.removeTop()), lastMove(move) {
         assert(!copy.waste.empty());
         assert((copy.tableaus[move].empty() && copy.waste.top().getValue() == CardValue::KING) || (!copy.tableaus[move].empty() && (copy.waste.top() + 1).getValue() == copy.tableaus[move].top().getValue() && copy.waste.top().getColor() != copy.tableaus[move].top().getColor()));
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
@@ -433,7 +433,7 @@ public:
             foundations[i] = copy.foundations[i];
         }        
     }
-    GameState(const GameState& copy, const TableauToFoundation& move) : stockPile(copy.getStockPile()), waste(copy.getWaste()) {
+    GameState(const GameState& copy, const TableauToFoundation& move) : stockPile(copy.getStockPile()), waste(copy.getWaste()), lastMove(move) {
         assert(!copy.tableaus[move].empty());
         Card cardToMove = copy.tableaus[move].top();
         size_t foundationId = std::enum_value(cardToMove.getSuit());
@@ -455,7 +455,7 @@ public:
             }
         }
     }
-    GameState(const GameState& copy, const TableauToTableau& move) : stockPile(copy.getStockPile()), waste(copy.getWaste()) {
+    GameState(const GameState& copy, const TableauToTableau& move) : stockPile(copy.getStockPile()), waste(copy.getWaste()), lastMove(move) {
         assert(copy.tableaus[move.getSource()].size() >= move.getNumCards());
         assert(move.getSource() != move.getDestination());
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
@@ -471,7 +471,7 @@ public:
         tableaus[move.getSource()].revealTop();
         for(size_t i=0; i<std::extent<decltype(foundations)>::value; ++i) {
             foundations[i] = copy.foundations[i];
-        }        
+        }
     }
     /* TODO: Implement this move constructor when/if needed.
     GameState(GameState&& move) : stockPile(std::move(move.stockPile)), waste(std::move(move.waste)) {
@@ -482,14 +482,15 @@ public:
     inline const CardPile& getTableau(uint_fast8_t index) const { return tableaus[index]; }
     inline const CardPile& getFoundation(uint_fast8_t index) const { return foundations[index]; }
     inline const CardPile& getFoundation(Suit suit) const { return foundations[std::enum_value(suit)]; }
+    inline Move getLastMove() const { return lastMove; }
     std::vector<GameState> successors() const {
         std::vector<GameState> succ;
         if(!stockPile.empty()) {
             /* move one card from the stock pile into the waste */
-            succ.emplace_back(*this, Move::MOVE_TO_WASTE);
+            succ.emplace_back(*this, MoveToWaste());
         } else if(waste.size() > 1) {
             /* flip the waste back over to the empty stock pile, removing the top card back to the waste */
-            succ.emplace_back(*this, Move::MAKE_NEW_STOCK);
+            succ.emplace_back(*this, MakeNewStock());
         }
         if(!waste.empty()) {
             Card wasteTop = waste.top();
@@ -572,12 +573,3 @@ int main(int, char**) {
         std::cout << succ << std::endl;
     }
 }
-
-
-
-
-
-
-
-
-
