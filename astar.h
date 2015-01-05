@@ -119,7 +119,9 @@ public:
         SearchNode<T> next = queue.top();
         bool isFirstExpansion = nodesExpanded == 0;
 	if(nodesExpanded++ % 30000 == 0) {
-            std::cout << "Searching: Depth " << next.getPathCost() << ", F-Cost " << next.getFCost() << ", Queue Size " << queue.size() << std::endl;// << next.getState() << std::endl;
+            std::cout << "\x1b[2K";
+            std::cout << "\rSearching: Depth " << next.getPathCost() << ", F-Cost " << next.getFCost() << ", Queue Size " << queue.size();// << next.getState();
+            std::cout.flush();
         }
         queue.pop();
         if(isFirstExpansion || depthLimit == 0 || next.getPathCost() < depthLimit) {

@@ -662,7 +662,8 @@ int main(int argc, char** argv) {
     std::unordered_set<GameState> history;
     for(size_t move=0;;++move) {
         astar::AStar<GameState,std::function<unsigned(const GameState&)>> as(game, &naiveHeuristic, 25);
-        std::cout << "Move #" << move << "\tHeuristic: " << as.top().getHeuristic() << std::endl;
+        std::cout << "\x1b[2J\x1b[H";
+        std::cout << "Move #" << move << "\tHeuristic: " << as.top().getHeuristic() << std::endl << std::endl;
         std::cout << game << std::endl;
         if(as.isDone()) {
             break;
@@ -671,6 +672,7 @@ int main(int argc, char** argv) {
         as.setHistory(history);
         if(auto result = as.solve()) {
             Move initialMove = *result.getInitialMove();
+            assert(initialMove.type != MoveType::DEAL);
             game = game.applyMove(initialMove);
         } else {
             std::cout << "No solution found!" << std::endl;
