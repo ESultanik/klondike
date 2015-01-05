@@ -165,7 +165,7 @@ public:
 };
 
 class CardPile {
-private:
+protected:
     uint8_t internalSize;
     uint8_t numHidden;
     Card* pile;
@@ -184,12 +184,12 @@ public:
         move.internalSize = 0;
         move.numHidden = 0;
     }
-    ~CardPile() {
+    virtual ~CardPile() {
         if(pile) {
             delete pile;
         }
     }
-    CardPile& operator=(const CardPile& copy) {
+    virtual CardPile& operator=(const CardPile& copy) {
         delete pile;
         internalSize = copy.internalSize;
         numHidden = copy.numHidden;
@@ -197,7 +197,7 @@ public:
         memcpy(pile, copy.pile, sizeof(Card) * internalSize);
         return *this;
     }
-    CardPile& operator=(CardPile&& move) {
+    virtual CardPile& operator=(CardPile&& move) {
         delete pile;
         internalSize = move.internalSize;
         numHidden = move.numHidden;
@@ -207,7 +207,7 @@ public:
         move.numHidden = 0;
         return *this;
     }
-    bool operator==(const CardPile& other) const {
+    virtual bool operator==(const CardPile& other) const {
         if(size() != other.size() || getNumHidden() != other.getNumHidden()) {
             return false;
         }
@@ -218,7 +218,7 @@ public:
         }
         return true;
     }
-    bool operator!=(const CardPile& other) const { return !(*this == other); }
+    inline bool operator!=(const CardPile& other) const { return !(*this == other); }
     inline size_t size() const { return internalSize; }
     inline bool empty() const { return size() == 0; }
     inline size_t getNumHidden() const { return numHidden; }
@@ -299,7 +299,7 @@ public:
             return (*this)[0];
         }
     }
-    inline size_t hash() const {
+    virtual inline size_t hash() const {
         size_t h = 0;
         for(size_t i=0; i<internalSize; ++i) {
             /* shift left six bits (with looparound) and XOR with the next card: */
@@ -309,9 +309,40 @@ public:
     }
 };
 
+class TableauPile : public CardPile {
+public:
+    TableauPile() : CardPile() {}
+    TableauPile(uint_fast8_t numCards, uint_fast8_t numHidden) : CardPile(numCards, numHidden) {}
+    TableauPile(const CardPile& copy) : CardPile(copy) {}
+    TableauPile(CardPile&& move) : CardPile(move) {}
+    virtual TableauPile& operator=(const CardPile& copy) {
+        return static_cast<TableauPile&>(CardPile::operator=(copy));
+    }
+    virtual TableauPile& operator=(CardPile&& move) {
+        return static_cast<TableauPile&>(CardPile::operator=(move));
+    }
+    virtual bool operator==(const TableauPile& other) const {
+        if(size() != other.size() || getNumHidden() != other.getNumHidden()) {
+            return false;
+        }
+        return empty() || (pile[0].getColor() == other.pile[0].getColor() && pile[0].getValue() == other.pile[0].getValue());
+    }
+    virtual inline size_t hash() const {
+        size_t h = empty() ? 0 : std::enum_value(pile[0].getValue()) << 4 | std::enum_value(pile[0].getSuit());
+        h |= size() << 6;
+        h ^= getNumHidden();
+        return h;
+    }
+};
+
 namespace std {
     template <> struct hash<CardPile> {
         size_t operator()(const CardPile& pile) const {
+            return pile.hash();
+        }
+    };
+    template <> struct hash<TableauPile> {
+        size_t operator()(const TableauPile& pile) const {
             return pile.hash();
         }
     };
@@ -386,14 +417,14 @@ class GameState {
 private:
     CardPile stockPile;
     CardPile waste;
-    CardPile tableaus[7];
+    TableauPile tableaus[7];
     CardPile foundations[4];
     Move lastMove;
 public:
     GameState(const Deck& deck) : stockPile(23, 23), waste(1, 0), lastMove(MoveType::DEAL, { 0 }) {
         size_t deckOffset = 0;
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
-            tableaus[i] = CardPile(i + 1, i);
+            tableaus[i] = TableauPile(i + 1, i);
             for(size_t j=0; j<=i; ++j) {
                 tableaus[i].set(j, deck[deckOffset++]);
             }
@@ -526,7 +557,7 @@ public:
     }
     inline const CardPile& getStockPile() const { return stockPile; }
     inline const CardPile& getWaste() const { return waste; }
-    inline const CardPile& getTableau(uint_fast8_t index) const { return tableaus[index]; }
+    inline const TableauPile& getTableau(uint_fast8_t index) const { return tableaus[index]; }
     inline const CardPile& getFoundation(uint_fast8_t index) const { return foundations[index]; }
     inline const CardPile& getFoundation(Suit suit) const { return foundations[std::enum_value(suit)]; }
     inline Move getLastMove() const { return lastMove; }
@@ -586,8 +617,8 @@ public:
                 return false;
             }
         }
-        std::unordered_set<CardPile> myTableau;
-        std::unordered_set<CardPile> otherTableau;
+        std::unordered_set<TableauPile> myTableau;
+        std::unordered_set<TableauPile> otherTableau;
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
             myTableau.insert(tableaus[i]);
             otherTableau.insert(tableaus[i]);
@@ -685,7 +716,7 @@ int main(int argc, char** argv) {
         if(as.isDone()) {
             break;
         }
-        if(auto result = as.solve(1000, 1, [&as](const astar::SearchNode<GameState>& state, const astar::AStar<GameState,std::function<unsigned(const GameState&)>>& as, unsigned depthLimit)->bool{
+        if(auto result = as.solve(500, 1, [&as](const astar::SearchNode<GameState>& state, const astar::AStar<GameState,std::function<unsigned(const GameState&)>>& as, unsigned depthLimit)->bool{
                     if((as.getNodesExpanded() - 1) % 5000 == 0) {
                         std::cout << "\x1b[2K";
                         std::cout << "\rSearching: Depth " << state.getPathCost() << ", F-Cost " << state.getFCost() << ", Queue Size " << as.getQueueSize() << ", Depth Limit " << depthLimit;// << next.getState();
