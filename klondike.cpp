@@ -335,6 +335,7 @@ public:
     MoveData data;
     Move(MoveType type, MoveData data) : type(type), data(data) {}
     Move(const Move& copy) : type(copy.type), data(copy.data) {}
+    Move() : Move(MoveType::DEAL, {0}) {}
 };
 
 class MoveToWaste : public Move {
@@ -637,8 +638,8 @@ int main(int argc, char** argv) {
     std::cout << "Game #" << deck.getSeed() << std::endl << std::endl;
     std::cout << game;
     astar::AStar<GameState,std::function<unsigned(const GameState&)>> as(game, &naiveHeuristic);
-    auto result = as.getBestMove();
-    std::cout << result.second.getState();
+    auto result = as.solve();
+    std::cout << result.getState();
     /*for(auto succ : game.successors()) {
         std::cout << succ << std::endl;
         }*/

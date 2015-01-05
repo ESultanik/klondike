@@ -8,18 +8,37 @@
 
 namespace astar {
 
+template <bool, class M>
+struct MoveTypeRef {
+    M move;
+    MoveTypeRef(const M* copy) : move(copy == nullptr ? M() : *copy) {}
+    inline operator const M*() const { return &move; }
+};
+
+template <class M>
+struct MoveTypeRef<true, M> {
+    const M* move;
+    MoveTypeRef(const M* copy) : move(copy) {}
+    inline operator const M*() const { return move; }
+};
+
 template <class T>
 class SearchNode {
+public:
+    typedef decltype(((T*)nullptr)->getLastMove()) MoveType;
+
 private:
+    typedef MoveTypeRef<(sizeof(MoveType) > sizeof(MoveType*)), MoveType> MoveTypeRefImpl;
     const T* state;
     unsigned pathCost;
     unsigned heuristic;
     mutable std::vector<T> cachedSuccessors;
+    MoveTypeRefImpl initialMove;
 public:
-    SearchNode() : state(nullptr), pathCost(0), heuristic(0) {}
-    SearchNode(const T& state, unsigned pathCost, unsigned heuristic) : state(&state), pathCost(pathCost), heuristic(heuristic) {}
-    SearchNode(const SearchNode<T>& copy) : state(copy.state), pathCost(copy.pathCost), heuristic(copy.heuristic), cachedSuccessors(copy.cachedSuccessors) {}
-    SearchNode(SearchNode<T>&& move) : state(move.state), pathCost(move.pathCost), heuristic(move.heuristic), cachedSuccessors(std::move(move.cachedSuccessors)) {}
+    SearchNode() : state(nullptr), pathCost(0), heuristic(0), initialMove(nullptr) {}
+    SearchNode(const T& state, unsigned pathCost, unsigned heuristic, const MoveType* initialMove = nullptr) : state(&state), pathCost(pathCost), heuristic(heuristic), initialMove(initialMove) {}
+    SearchNode(const SearchNode<T>& copy) : state(copy.state), pathCost(copy.pathCost), heuristic(copy.heuristic), cachedSuccessors(copy.cachedSuccessors), initialMove(copy.initialMove) {}
+    SearchNode(SearchNode<T>&& move) : state(move.state), pathCost(move.pathCost), heuristic(move.heuristic), cachedSuccessors(std::move(move.cachedSuccessors)), initialMove(std::move(move.initialMove)) {}
     ~SearchNode() {}
 
     SearchNode& operator=(const SearchNode<T>& copy) {
@@ -38,6 +57,10 @@ public:
     }
 
     inline operator bool() const { return state != nullptr; }
+
+    inline const MoveType* getInitialMove() const {
+        return initialMove;
+    }
 
     inline const T& getState() const { return *state; }
     inline unsigned getPathCost() const { return pathCost; }
@@ -67,6 +90,9 @@ private:
     unsigned depthLimit;
 public:
     typedef decltype(((T*)nullptr)->getLastMove()) MoveType;
+private:
+    std::vector<MoveType> initialMoves;
+public:
     AStar(const T& initialState, const H& heuristic, unsigned depthLimit = 0) : queue(&nodeComparator<T>), heuristic(heuristic), nodesExpanded(0), depthLimit(depthLimit) {
         const T& h = *history.insert(initialState).first;
         queue.emplace(h, 0, heuristic(initialState));
@@ -80,14 +106,18 @@ public:
             throw std::runtime_error("There are no more states to search!");
         }
         SearchNode<T> next = queue.top();
+        bool isFirstExpansion = nodesExpanded == 0;
 	if(nodesExpanded++ % 10000 == 0) {
-            std::cout << "Searching: " << next.getFCost() << "\t" << queue.size() << std::endl;// << next.getState() << std::endl;
+            std::cout << "Searching: Depth " << next.getPathCost() << ", F-Cost " << next.getFCost() << "\t" << queue.size() << std::endl;// << next.getState() << std::endl;
         }
         queue.pop();
         for(const T& successor : next.getSuccessors()) {
             if(history.find(successor) == history.end()) {
                 const T& h = *history.insert(successor).first;
-                queue.emplace(h, next.getPathCost() + 1, heuristic(successor));
+                if(isFirstExpansion) {
+                    initialMoves.push_back(h.getLastMove());
+                }
+                queue.emplace(h, next.getPathCost() + 1, heuristic(successor), isFirstExpansion ? &initialMoves.back() : next.getInitialMove());
             }
         }
         return next;
