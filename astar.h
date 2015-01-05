@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 #include <unordered_set>
+#include <chrono>
 
 namespace astar {
 
@@ -112,17 +113,14 @@ public:
     inline bool isDone() const {
         return queue.empty() || queue.top().getSuccessors().empty();
     }
+    inline size_t getNodesExpanded() const { return nodesExpanded; }
+    inline size_t getQueueSize() const { return queue.size(); }
     SearchNode<T> step() {
         if(queue.empty()) {
             throw std::runtime_error("There are no more states to search!");
         }
         SearchNode<T> next = queue.top();
-        bool isFirstExpansion = nodesExpanded == 0;
-	if(nodesExpanded++ % 30000 == 0) {
-            std::cout << "\x1b[2K";
-            std::cout << "\rSearching: Depth " << next.getPathCost() << ", F-Cost " << next.getFCost() << ", Queue Size " << queue.size();// << next.getState();
-            std::cout.flush();
-        }
+        bool isFirstExpansion = nodesExpanded++ == 0;
         queue.pop();
         if(isFirstExpansion || depthLimit == 0 || next.getPathCost() < depthLimit) {
             for(const T& successor : next.getSuccessors()) {
@@ -137,12 +135,15 @@ public:
         }
         return next;
     }
-    SearchNode<T> solve() {
+    SearchNode<T> solve(const std::function<bool(const SearchNode<T>&)>& callback = [](const SearchNode<T>&) { return true; }) {
         SearchNode<T> best;
         bool bestSet = false;
         bool first = true;
         for(;;) {
             SearchNode<T> next = step();
+            if(!callback(next)) {
+                return SearchNode<T>();
+            }
             if(next.getState().isWin()) {
                 return next;
             } else if(!first && (next.getPathCost() >= depthLimit || !bestSet || next.getFCost() < best.getFCost())) {
@@ -154,6 +155,48 @@ public:
             }
             first = false;
         }
+    }
+};
+
+template <class T, class H>
+class IDAStar {
+    const T& initialState;
+    H heuristic;
+    const std::unordered_set<T>& history;
+public:
+    IDAStar(const T& initialState, H heuristic, const std::unordered_set<T>& history) : initialState(initialState), heuristic(heuristic), history(history) {}
+    bool isDone() const {
+        return AStar<T,H>(initialState, heuristic, 0).isDone();
+    }
+    SearchNode<T> solve(std::chrono::milliseconds timeLimit, unsigned initialDepth = 1, const std::function<bool(const SearchNode<T>&, const AStar<T,H>&, unsigned)>& callback = [](const SearchNode<T>&) { return true; }) {
+        auto startTime = std::chrono::system_clock::now().time_since_epoch();
+        SearchNode<T> bestResult;
+        if(initialDepth < 1) {
+            initialDepth = 1;
+        }
+        for(unsigned depth=initialDepth;; ++depth) {
+            AStar<T,H> as(initialState, heuristic, depth);
+            if(as.isDone()) {
+                break;
+            }
+            as.setHistory(history);
+            if(SearchNode<T> newBest = as.solve([&callback,startTime,timeLimit,&as,depth](const SearchNode<T>& node)->bool{
+                        auto timeElapsed = std::chrono::system_clock::now().time_since_epoch() - startTime;
+                        if(timeElapsed >= timeLimit) {
+                            return false;
+                        } else {
+                            return callback(node, as, depth);
+                        }
+                    })) {
+                bestResult = newBest;
+            } else {
+                break;
+            }
+        }
+        return bestResult;
+    }
+    inline SearchNode<T> solve(unsigned timeLimit, unsigned initialDepth = 1, const std::function<bool(const SearchNode<T>&, const AStar<T,H>&, unsigned)>& callback = [](const SearchNode<T>&) { return true; }) {
+        return solve(std::chrono::milliseconds(timeLimit), initialDepth, callback);
     }
 };
 

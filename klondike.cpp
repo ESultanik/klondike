@@ -645,7 +645,7 @@ unsigned naiveHeuristic(const GameState& state) {
     }
 #if 1
     unsigned cardsRemaining = 52 - (state.getFoundation(0).size() + state.getFoundation(1).size() + state.getFoundation(2).size() + state.getFoundation(3).size());
-    return cardsRemaining + unknownTableauCards + numTableausWithUnknown;
+    return cardsRemaining;// + unknownTableauCards + numTableausWithUnknown;
 #else
     return unknownTableauCards + state.getStockPile().size() + numTableausWithUnknown + state.getWaste().size();
 #endif
@@ -660,17 +660,24 @@ int main(int argc, char** argv) {
     GameState game(deck);
     std::cout << "Game #" << deck.getSeed() << std::endl << std::endl;
     std::unordered_set<GameState> history;
+
     for(size_t move=0;;++move) {
-        astar::AStar<GameState,std::function<unsigned(const GameState&)>> as(game, &naiveHeuristic, 25);
+        history.insert(game);
+        astar::IDAStar<GameState,std::function<unsigned(const GameState&)>> as(game, &naiveHeuristic, history);
         std::cout << "\x1b[2J\x1b[H";
-        std::cout << "Move #" << move << "\tHeuristic: " << as.top().getHeuristic() << std::endl << std::endl;
+        std::cout << "Move #" << move << "\tHeuristic: " << naiveHeuristic(game) << std::endl << std::endl;
         std::cout << game << std::endl;
         if(as.isDone()) {
             break;
         }
-        history.insert(game);
-        as.setHistory(history);
-        if(auto result = as.solve()) {
+        if(auto result = as.solve(1000, 1, [&as](const astar::SearchNode<GameState>& state, const astar::AStar<GameState,std::function<unsigned(const GameState&)>>& as, unsigned depthLimit)->bool{
+                    if((as.getNodesExpanded() - 1) % 5000 == 0) {
+                        std::cout << "\x1b[2K";
+                        std::cout << "\rSearching: Depth " << state.getPathCost() << ", F-Cost " << state.getFCost() << ", Queue Size " << as.getQueueSize() << ", Depth Limit " << depthLimit;// << next.getState();
+                        std::cout.flush();
+                    }
+                    return true;
+                })) {
             Move initialMove = *result.getInitialMove();
             assert(initialMove.type != MoveType::DEAL);
             game = game.applyMove(initialMove);
