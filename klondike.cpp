@@ -5,8 +5,6 @@
 #include <chrono>
 #include <algorithm>
 
-#include "astar.h"
-
 namespace std {
     template <typename T>
     constexpr typename std::underlying_type<T>::type enum_value(T val) {
@@ -22,6 +20,8 @@ namespace std {
         }
     }
 }
+
+#include "astar.h"
 
 enum class Color : bool {
     BLACK = 1,
@@ -498,12 +498,31 @@ public:
     GameState(GameState&& move) : stockPile(std::move(move.stockPile)), waste(std::move(move.waste)) {
     }
     */
+    GameState applyMove(const Move& move) const {
+        switch(move.type) {
+        case MoveType::DEAL:
+            return GameState(Deck());
+        case MoveType::MOVE_TO_WASTE:
+            return GameState(*this, MoveToWaste());
+        case MoveType::MAKE_NEW_STOCK:
+            return GameState(*this, MakeNewStock());
+        case MoveType::WASTE_TO_FOUNDATION:
+            return GameState(*this, WasteToFoundation(move.data.foundation));
+        case MoveType::WASTE_TO_TABLEAU:
+            return GameState(*this, WasteToTableau(move.data.tableau));
+        case MoveType::TABLEAU_TO_FOUNDATION:
+            return GameState(*this, TableauToFoundation(move.data.tableau));
+        case MoveType::TABLEAU_TO_TABLEAU:
+            return GameState(*this, TableauToTableau(move.data.tableauMove.source, move.data.tableauMove.numCards, move.data.tableauMove.destination));
+        }
+    }
     inline const CardPile& getStockPile() const { return stockPile; }
     inline const CardPile& getWaste() const { return waste; }
     inline const CardPile& getTableau(uint_fast8_t index) const { return tableaus[index]; }
     inline const CardPile& getFoundation(uint_fast8_t index) const { return foundations[index]; }
     inline const CardPile& getFoundation(Suit suit) const { return foundations[std::enum_value(suit)]; }
     inline Move getLastMove() const { return lastMove; }
+    inline bool isWin() const { return foundations[0].size() == 13 && foundations[1].size() == 13 && foundations[2].size() == 13 && foundations[3].size() == 13; }
     std::vector<GameState> successors() const {
         std::vector<GameState> succ;
         if(!stockPile.empty()) {
@@ -616,7 +635,6 @@ std::ostream& operator<<(std::ostream& stream, const GameState& state) {
 }
 
 unsigned naiveHeuristic(const GameState& state) {
-    unsigned cardsRemaining = 52 - (state.getFoundation(0).size() + state.getFoundation(1).size() + state.getFoundation(2).size() + state.getFoundation(3).size());
     unsigned unknownTableauCards = 0;
     unsigned numTableausWithUnknown = 0;
     for(size_t i=0; i<7; ++i) {
@@ -625,7 +643,12 @@ unsigned naiveHeuristic(const GameState& state) {
             ++numTableausWithUnknown;
         }
     }
-    return cardsRemaining + unknownTableauCards + state.getStockPile().size() + numTableausWithUnknown;
+#if 1
+    unsigned cardsRemaining = 52 - (state.getFoundation(0).size() + state.getFoundation(1).size() + state.getFoundation(2).size() + state.getFoundation(3).size());
+    return cardsRemaining + unknownTableauCards + numTableausWithUnknown;
+#else
+    return unknownTableauCards + state.getStockPile().size() + numTableausWithUnknown + state.getWaste().size();
+#endif
 }
 
 int main(int argc, char** argv) {
@@ -636,10 +659,24 @@ int main(int argc, char** argv) {
     }
     GameState game(deck);
     std::cout << "Game #" << deck.getSeed() << std::endl << std::endl;
-    std::cout << game;
-    astar::AStar<GameState,std::function<unsigned(const GameState&)>> as(game, &naiveHeuristic);
-    auto result = as.solve();
-    std::cout << result.getState();
+    std::unordered_set<GameState> history;
+    for(size_t move=0;;++move) {
+        astar::AStar<GameState,std::function<unsigned(const GameState&)>> as(game, &naiveHeuristic, 25);
+        std::cout << "Move #" << move << "\tHeuristic: " << as.top().getHeuristic() << std::endl;
+        std::cout << game << std::endl;
+        if(as.isDone()) {
+            break;
+        }
+        history.insert(game);
+        as.setHistory(history);
+        if(auto result = as.solve()) {
+            Move initialMove = *result.getInitialMove();
+            game = game.applyMove(initialMove);
+        } else {
+            std::cout << "No solution found!" << std::endl;
+            break;
+        }
+    }
     /*for(auto succ : game.successors()) {
         std::cout << succ << std::endl;
         }*/

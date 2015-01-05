@@ -46,6 +46,7 @@ public:
         pathCost = copy.pathCost;
         heuristic = copy.heuristic;
         cachedSuccessors = copy.cachedSuccessors;
+        initialMove = copy.initialMove;
         return *this;
     }
     SearchNode& operator=(SearchNode<T>&& move) {
@@ -53,6 +54,7 @@ public:
         pathCost = move.pathCost;
         heuristic = move.heuristic;
         cachedSuccessors = std::move(move.cachedSuccessors);
+        initialMove = std::move(move.initialMove);
         return *this;
     }
 
@@ -76,7 +78,7 @@ public:
 
 template <class T>
 inline bool nodeComparator(const SearchNode<T>& lhs, const SearchNode<T>& rhs) {
-    return lhs.getFCost() > rhs.getFCost();
+    return lhs.getFCost() < rhs.getFCost();
 }
 
 template <class T, class H>
@@ -101,71 +103,55 @@ public:
         const T& h = *history.insert(initialState).first;
         queue.emplace(h, 0, heuristic(initialState));
     }
+    void setHistory(const std::unordered_set<T>& existingHistory) {
+        history = existingHistory;
+    }
+    const SearchNode<T>& top() const {
+        return queue.top();
+    }
+    inline bool isDone() const {
+        return queue.empty() || queue.top().getSuccessors().empty();
+    }
     SearchNode<T> step() {
         if(queue.empty()) {
             throw std::runtime_error("There are no more states to search!");
         }
         SearchNode<T> next = queue.top();
         bool isFirstExpansion = nodesExpanded == 0;
-	if(nodesExpanded++ % 10000 == 0) {
-            std::cout << "Searching: Depth " << next.getPathCost() << ", F-Cost " << next.getFCost() << "\t" << queue.size() << std::endl;// << next.getState() << std::endl;
+	if(nodesExpanded++ % 30000 == 0) {
+            std::cout << "Searching: Depth " << next.getPathCost() << ", F-Cost " << next.getFCost() << ", Queue Size " << queue.size() << std::endl;// << next.getState() << std::endl;
         }
         queue.pop();
-        for(const T& successor : next.getSuccessors()) {
-            if(history.find(successor) == history.end()) {
-                const T& h = *history.insert(successor).first;
-                if(isFirstExpansion) {
-                    initialMoves.push_back(h.getLastMove());
+        if(isFirstExpansion || depthLimit == 0 || next.getPathCost() < depthLimit) {
+            for(const T& successor : next.getSuccessors()) {
+                if(history.find(successor) == history.end()) {
+                    const T& h = *history.insert(successor).first;
+                    if(isFirstExpansion) {
+                        initialMoves.push_back(h.getLastMove());
+                    }
+                    queue.emplace(h, next.getPathCost() + 1, heuristic(successor), isFirstExpansion ? &initialMoves.back() : next.getInitialMove());
                 }
-                queue.emplace(h, next.getPathCost() + 1, heuristic(successor), isFirstExpansion ? &initialMoves.back() : next.getInitialMove());
             }
         }
         return next;
     }
     SearchNode<T> solve() {
+        SearchNode<T> best;
+        bool bestSet = false;
+        bool first = true;
         for(;;) {
-            SearchNode<T> best = step();
-            if(best.getSuccessors().empty() || queue.empty()) {
-                return best;
+            SearchNode<T> next = step();
+            if(next.getState().isWin()) {
+                return next;
+            } else if(!first && (next.getPathCost() >= depthLimit || !bestSet || next.getFCost() < best.getFCost())) {
+                best = next;
+                bestSet = true;
             }
-        }
-    }
-    std::pair<MoveType,SearchNode<T>> getBestMove() {
-        if(queue.empty()) {
-            throw std::runtime_error("There are no more states to search!");
-        } else if(queue.size() != 1) {
-            throw std::runtime_error("Error: getBestMove() is only expected to be called when there is exactly one search node in the queue!");
-        }
-        SearchNode<T> currentState = queue.top();
-        queue.pop();
-        if(currentState.getSuccessors().empty()) {
-            throw std::runtime_error("The current state has no legal moves!");
-        }
-        MoveType* best = nullptr;
-        SearchNode<T>* bestResult = nullptr;
-        for(const T& successor : currentState.getSuccessors()) {
-            const T& h = *history.insert(successor).first;
-            queue.emplace(h, currentState.getPathCost() + 1, heuristic(successor));
-            for(;;) {
-                SearchNode<T> result = step();
-                if(result.getSuccessors().empty() || queue.empty()) {
-                    if(bestResult == nullptr || bestResult->getFCost() > result.getFCost()) {
-                        delete best;
-                        delete bestResult;
-                        best = new MoveType(successor.getLastMove());
-                        bestResult = new SearchNode<T>(std::move(result));
-                    }
-                    break;
-                }
+            if(queue.empty()) {
+                return first ? next : best;
             }
-            queue = QueueType(&nodeComparator<T>);
-            history.clear();
-            history.insert(currentState.getState());
+            first = false;
         }
-        auto ret = std::make_pair(std::move(*best), std::move(*bestResult));
-        delete best;
-        delete bestResult;
-        return ret;
     }
 };
 
