@@ -505,6 +505,13 @@ public:
     inline Move getLastMove() const { return lastMove; }
     std::vector<GameState> successors() const {
         std::vector<GameState> succ;
+        if(!stockPile.empty()) {
+            /* move one card from the stock pile into the waste */
+            succ.emplace_back(*this, MoveToWaste());
+        } else if(waste.size() > 1) {
+            /* flip the waste back over to the empty stock pile, removing the top card back to the waste */
+            succ.emplace_back(*this, MakeNewStock());
+        }
         if(!waste.empty()) {
             Card wasteTop = waste.top();
             size_t foundationId = std::enum_value(wasteTop.getSuit());
@@ -542,13 +549,6 @@ public:
                     }
                 }
             }
-        }
-        if(!stockPile.empty()) {
-            /* move one card from the stock pile into the waste */
-            succ.emplace_back(*this, MoveToWaste());
-        } else if(waste.size() > 1) {
-            /* flip the waste back over to the empty stock pile, removing the top card back to the waste */
-            succ.emplace_back(*this, MakeNewStock());
         }
         return succ;
     }
@@ -617,14 +617,22 @@ std::ostream& operator<<(std::ostream& stream, const GameState& state) {
 unsigned naiveHeuristic(const GameState& state) {
     unsigned cardsRemaining = 52 - (state.getFoundation(0).size() + state.getFoundation(1).size() + state.getFoundation(2).size() + state.getFoundation(3).size());
     unsigned unknownTableauCards = 0;
+    unsigned numTableausWithUnknown = 0;
     for(size_t i=0; i<7; ++i) {
         unknownTableauCards += state.getTableau(i).getNumHidden();
+        if(state.getTableau(i).getNumHidden()) {
+            ++numTableausWithUnknown;
+        }
     }
-    return cardsRemaining + unknownTableauCards;
+    return cardsRemaining + unknownTableauCards + state.getStockPile().size() + numTableausWithUnknown;
 }
 
-int main(int, char**) {
+int main(int argc, char** argv) {
     Deck deck;
+    if(argc > 1) {
+        unsigned seed = atoll(argv[1]);
+        deck = Deck(seed);
+    }
     GameState game(deck);
     std::cout << "Game #" << deck.getSeed() << std::endl << std::endl;
     std::cout << game;

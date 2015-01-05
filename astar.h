@@ -63,13 +63,15 @@ private:
     QueueType queue;
     H heuristic;
     std::unordered_set<T> history;
+    size_t nodesExpanded;
+    unsigned depthLimit;
 public:
     typedef decltype(((T*)nullptr)->getLastMove()) MoveType;
-    AStar(const T& initialState, const H& heuristic) : queue(&nodeComparator<T>), heuristic(heuristic) {
+    AStar(const T& initialState, const H& heuristic, unsigned depthLimit = 0) : queue(&nodeComparator<T>), heuristic(heuristic), nodesExpanded(0), depthLimit(depthLimit) {
         const T& h = *history.insert(initialState).first;
         queue.emplace(h, 0, heuristic(initialState));
     }
-    AStar(T&& initialState, const H& heuristic) : queue(&nodeComparator<T>), heuristic(heuristic) {
+    AStar(T&& initialState, const H& heuristic, unsigned depthLimit = 0) : queue(&nodeComparator<T>), heuristic(heuristic), nodesExpanded(0), depthLimit(depthLimit) {
         const T& h = *history.insert(initialState).first;
         queue.emplace(h, 0, heuristic(initialState));
     }
@@ -78,7 +80,9 @@ public:
             throw std::runtime_error("There are no more states to search!");
         }
         SearchNode<T> next = queue.top();
-        std::cout << "Searching: " << next.getFCost() << "\t" << queue.size() << std::endl;// << next.getState() << std::endl;
+	if(nodesExpanded++ % 10000 == 0) {
+            std::cout << "Searching: " << next.getFCost() << "\t" << queue.size() << std::endl;// << next.getState() << std::endl;
+        }
         queue.pop();
         for(const T& successor : next.getSuccessors()) {
             if(history.find(successor) == history.end()) {
