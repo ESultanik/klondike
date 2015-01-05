@@ -309,6 +309,14 @@ public:
     }
 };
 
+namespace std {
+    template <> struct hash<CardPile> {
+        size_t operator()(const CardPile& pile) const {
+            return pile.hash();
+        }
+    };
+}
+
 enum class MoveType : uint8_t {
     DEAL,
     MOVE_TO_WASTE,
@@ -578,10 +586,17 @@ public:
                 return false;
             }
         }
+        std::unordered_set<CardPile> myTableau;
+        std::unordered_set<CardPile> otherTableau;
         for(size_t i=0; i<std::extent<decltype(tableaus)>::value; ++i) {
-            if(tableaus[i] != other.tableaus[i]) {
+            myTableau.insert(tableaus[i]);
+            otherTableau.insert(tableaus[i]);
+            /*if(tableaus[i] != other.tableaus[i]) {
                 return false;
-            }
+                }*/
+        }
+        if(myTableau != otherTableau) {
+            return false;
         }
         return stockPile == other.stockPile && waste == other.waste;
     }
